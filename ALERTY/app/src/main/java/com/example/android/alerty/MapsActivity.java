@@ -34,6 +34,7 @@ import com.firebase.geofire.GeoLocation;
 import com.firebase.geofire.GeoQuery;
 import com.firebase.geofire.GeoQueryDataEventListener;
 import com.firebase.geofire.GeoQueryEventListener;
+import com.firebase.geofire.LocationCallback;
 import com.google.android.gms.auth.api.Auth;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
@@ -77,26 +78,27 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private static final String TAG = MapsActivity.class.getSimpleName();
     private final static int PLAY_SERVICES_REQUEST = 1000;
     private final static int REQUEST_CHECK_SETTINGS = 2000;
-    TextToSpeech textToSpeech;
+    private int MY_DATA_CHECK_CODE = 0;
+    public static TextToSpeech myTTS;
     private static int DISPLACEMENT = 20;
-    private Location mLastLocation;
+    public static Location mLastLocation;
     private LocationRequest mLocationRequest;
     private GoogleApiClient mGoogleApiClient;
     private FirebaseAuth mFirebaseAuth;
     private FirebaseUser mFirebaseUser;
     private String mUsername;
-    Location lat;
-    Location lon;
-    double latitude;
-    double longitude;
-    int num=0;
+    public double latitude;
+    public double longitude;
+    public double lat;
+    public double lon;
     public Boolean isPermissionGranted = false;
     private GoogleMap mMap;
     public static final String ANONYMOUS = "anonymous";
     DatabaseReference ref;
     GeoFire geoFire;
     GeoQuery geoQuery;
-    Marker mCurrent;
+    MarkerOptions marker;
+    private Integer num=0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,7 +109,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
 
-
         mUsername = ANONYMOUS;
         mGoogleApiClient = new GoogleApiClient.Builder(this)
                 .enableAutoManage(this, this)
@@ -116,8 +117,10 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         mFirebaseAuth = FirebaseAuth.getInstance();
         mFirebaseUser = mFirebaseAuth.getCurrentUser();
 
-        ref = FirebaseDatabase.getInstance().getReference(ID);
+
+        ref = FirebaseDatabase.getInstance().getReference();
         geoFire = new GeoFire(ref);
+        myTTS.speak("Be Alert! Be Safe!", TextToSpeech.QUEUE_ADD, null, "DEFAULT");
         setUpLocation();
         //permissionUtils = new PermissionUtils(MapsActivity.this);
 
@@ -217,16 +220,17 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;
 
-        }if (mGoogleApiClient.isConnected()){
+        }
+        if (mGoogleApiClient.isConnected()) {
             mLastLocation = LocationServices.FusedLocationApi.getLastLocation(mGoogleApiClient);
 
         }
         if (mLastLocation != null) {
             latitude = mLastLocation.getLatitude();
             longitude = mLastLocation.getLongitude();
-            final LatLng you = new LatLng(latitude, longitude);
-            Bitmap bm = BitmapFactory.decodeResource(getResources(), R.drawable.car1);
-            MarkerOptions marker = new MarkerOptions().position(you).title("Me").icon(BitmapDescriptorFactory.fromBitmap(bm));
+            LatLng you = new LatLng(latitude, longitude);
+            final Bitmap bm = BitmapFactory.decodeResource(getResources(), R.drawable.car1);
+            marker = new MarkerOptions().position(you).title("Me");
             mMap.addMarker(marker);
             mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(you, 15.0f)); //15.0f refers to the level of zooming
             LatLng circle = new LatLng(latitude, longitude);
@@ -235,22 +239,64 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     .radius(500) //500 m
                     .fillColor(0x220000FF)
                     .strokeColor(Color.BLUE)
-                    .strokeWidth(5.0f)
-            );
+                    .strokeWidth(5.0f));
+            geoFire.setLocation(ID, new GeoLocation(latitude, longitude), new GeoFire.CompletionListener() {
+                @Override
+                public void onComplete(String key, DatabaseError error) {
+//                    if (error!=null){
+//                        showToast("error");
+//                    } else {
+//                        showToast("saved");
+//                    }
+                }
+
+
+            });
+
 
             GeoQuery geoQuery = geoFire.queryAtLocation(new GeoLocation(circle.latitude, circle.longitude), 0.5f); //0.5 km
             geoQuery.addGeoQueryEventListener(new GeoQueryEventListener() {
                 @Override
                 public void onKeyEntered(String key, GeoLocation location) {
-                    showToast(String.format("Vehicle entered the search area at [%f,%f]", location.latitude, location.longitude));
-                    LatLng vehicle = new LatLng(location.latitude, location.longitude);
-//                    if (vehicle != you)
-//                        mMap.addMarker(new MarkerOptions().position(vehicle).title("Vehicle"));
+                    if (key != ID) {
+                        showToast(String.format("Vehicle entered the search area at [%f,%f]", location.latitude, location.longitude));
+                        num++;
+                        geoFire.setLocation(key, new GeoLocation(location.latitude, location.longitude), new GeoFire.CompletionListener() {
+                            @Override
+                            public void onComplete(String key, DatabaseError error) {
+                                if (error != null) {
+                                    showToast("error");
+                                } else {
+
+                                    //showToast("SAVED");
+                                }
+                            }
+
+                        });
+                        LatLng vehicle = new LatLng(10.5, 78);
+                        MarkerOptions veh = new MarkerOptions().position(vehicle).title("Vehicle").icon(BitmapDescriptorFactory.fromBitmap(bm));
+
+                        mMap.addMarker(veh);
+
+                    }
+                    {
+                        showToast("There are " + num + " vehicles within 500m radius");
+
+                        myTTS.speak("There are " + num + " vehicles within 500m radius", TextToSpeech.QUEUE_ADD, null, "DEFAULT");
+                    }
+
                 }
+
 
                 @Override
                 public void onKeyExited(String key) {
                     showToast(String.format("Vehcile %s is no longer in the search area", key));
+                    showToast("There are " + num + " vehicles within 500m radius");
+                    geoFire.removeLocation(key);
+                    myTTS.speak("There are " + num + " vehicles within 500m radius", TextToSpeech.QUEUE_ADD, null, "DEFAULT");
+
+
+                    num--;
                 }
 
                 @Override
@@ -265,36 +311,28 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 public void onGeoQueryError(DatabaseError error) {
                 }
             });
-            if (ref != null) {
-                geoFire.setLocation("Me", new GeoLocation(latitude, longitude), new GeoFire.CompletionListener() {
-                    @Override
-                    public void onComplete(String key, com.google.firebase.database.DatabaseError error) {
-//                    if (mCurrent != null) {
-//                        mCurrent.remove();
-//                        mCurrent = mMap.addMarker(new MarkerOptions().position(new LatLng(latitude, longitude)).title("Me"));
-//                        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(latitude, longitude), 15.0f));
+//            if (ref != null) {
+//                geoFire.setLocation("Me", new GeoLocation(latitude, longitude), new GeoFire.CompletionListener() {
+//                    @Override
+//                    public void onComplete(String key, com.google.firebase.database.DatabaseError error) {
+////                    if (mCurrent != null) {
+////                        mCurrent.remove();
+////                        mCurrent = mMap.addMarker(new MarkerOptions().position(new LatLng(latitude, longitude)).title("Me"));
+////                        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(latitude, longitude), 15.0f));
+////                    }
 //                    }
-                    }
-                });
-            }
-
-        } else {
-            Log.d("MapsActivity", "Can not get your location");
+//                });
+//            }
+//
+//        } else {
+//            Log.d("MapsActivity", "Can not get your location");
+//        }
         }
     }
 
-    private void speakUp(String s) {
-        if (s==null|"".equals(s)){
-            Log.d("error","String not available");
-        }else{
-            textToSpeech.speak(s,TextToSpeech.QUEUE_FLUSH,null);
-        }
 
-    }
-
-
+//
 //    private void createLocationRequest() {
-//        //showToast("CreateLoc");
 //
 //        mLocationRequest = new LocationRequest();
 //        mLocationRequest.setInterval(10000);
@@ -333,6 +371,12 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     }
     @Override
+    protected void onDestroy(){
+        myTTS.shutdown();
+        mGoogleApiClient.disconnect();
+        super.onDestroy();
+    }
+    @Override
     public void onConnected(@Nullable Bundle bundle) {
        getLocation();
     }
@@ -355,15 +399,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     }
 
-    private void startLocationUpdates() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-        {
-            return;
-        }try{        LocationServices.FusedLocationApi.requestLocationUpdates(mGoogleApiClient,mLocationRequest,this);
-        }catch (IllegalStateException e){
-            e.printStackTrace();
-        }
-    }
 
     @Override
     public void onConnectionSuspended(int i) {
@@ -441,7 +476,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     @Override
     public void onLocationChanged(Location location) {
         mLastLocation=location;
-        //displayLocation();
+        displayLocation();
     }
 
 
@@ -473,7 +508,18 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     @Override
     public void onMyLocationChange(Location location) {
         mLastLocation = location;
-        //displayLocation();
+        displayLocation();
     }
+
+
+//    public void speakwords(String words){
+//        if(myTTS != null) {
+//            myTTS.speak(words, TextToSpeech.QUEUE_ADD, null, "DEFAULT");
+//            showToast("speaking");
+//        }
+//    }
+
+
+
 }
 
